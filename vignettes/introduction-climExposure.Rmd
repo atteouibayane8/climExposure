@@ -1,0 +1,260 @@
+---
+title: "Introduction à climExposure : Analyse de l'Exposition Agricole aux Extrêmes Climatiques"
+author: "Votre Nom"
+date: "`r Sys.Date()`"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+    fig_width: 7
+    fig_height: 4.5
+vignette: >
+  %\VignetteIndexEntry{Introduction à climExposure}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment  = "#>",
+  warning  = FALSE,
+  message  = FALSE,
+  fig.align = "center"
+)
+library(climExposure)
+library(ggplot2)
+```
+
+## Introduction
+
+Le package **climExposure** permet d'analyser l'exposition des systèmes agricoles
+aux événements climatiques extrêmes. Il offre des outils pour :
+
+- Calculer des indices de chaleur, sécheresse et gel tardif
+- Identifier les zones agricoles à risque
+- Visualiser les tendances climatiques
+- Générer des rapports automatiques
+
+Dans cette vignette, nous utilisons les données d'exemple du Maroc (1981–2020)
+pour illustrer l'ensemble du flux de travail.
+
+---
+
+## 1. Chargement des données
+
+```{r load-data}
+# Données climatiques journalières (40 ans, Maroc simulé)
+data("climate_morocco")
+head(climate_morocco, 3)
+```
+
+```{r summary-data}
+# Aperçu statistique
+summary(climate_morocco[, c("tmax", "tmin", "prec")])
+```
+
+Le jeu de données contient **`r nrow(climate_morocco)` observations journalières**
+couvrant la période **`r min(climate_morocco$year)`–`r max(climate_morocco$year)`**.
+
+---
+
+## 2. Calcul des indices de chaleur
+
+```{r heatwave}
+# Seuil de 38°C (adapté au contexte marocain)
+hw_index <- calculate_heatwave_index(
+  climate_morocco,
+  threshold    = 38,
+  min_duration = 3,
+  period       = "annual"
+)
+tail(hw_index, 5)
+```
+
+### Visualisation de l'évolution des jours chauds
+
+```{r plot-heatwave, fig.cap="Nombre annuel de jours avec Tmax > 38°C (1981–2020)"}
+ggplot(hw_index, aes(x = year, y = n_hot_days)) +
+  geom_bar(stat = "identity", fill = "#e74c3c", alpha = 0.8) +
+  geom_smooth(method = "lm", color = "darkred", linewidth = 0.8, se = FALSE) +
+  labs(title = "Jours avec Tmax > 38°C au Maroc",
+       x = "Année", y = "Nombre de jours") +
+  theme_minimal()
+```
+
+---
+
+## 3. Calcul des indices de sécheresse
+
+```{r drought}
+drought_index <- calculate_drought_index(
+  climate_morocco,
+  method = "spi",
+  ref_period = c(1981, 2010)
+)
+head(drought_index, 5)
+```
+
+```{r drought-distribution, fig.cap="Distribution des classes de sécheresse"}
+drought_summary <- as.data.frame(table(drought_index$drought_class))
+names(drought_summary) <- c("Classe", "Frequence")
+
+ggplot(drought_summary, aes(x = Classe, y = Frequence, fill = Classe)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = c(
+    "extrême" = "#8B0000", "sévère" = "#d62728",
+    "modérée" = "#ff7f0e", "normale" = "#2ca02c"
+  )) +
+  labs(title = "Classes de sécheresse (SPI)", x = NULL, y = "Nombre de mois") +
+  theme_minimal() + theme(legend.position = "none")
+```
+
+---
+
+## 4. Risque de gel tardif
+
+```{r frost}
+# Adapté pour la vigne (période critique : avril–juin)
+frost_risk <- calculate_frost_risk(
+  climate_morocco,
+  frost_threshold = 0,
+  crop = "vine"
+)
+head(frost_risk, 5)
+```
+
+---
+
+## 5. Analyse des tendances climatiques
+
+```{r trends}
+trend_tmax <- analyze_trends(
+  climate_morocco,
+  variable   = "tmax",
+  ref_period = c(1981, 2010)
+)
+
+# Résultat clé
+cat("Tendance Tmax :", trend_tmax$trend_per_decade, "°C / décennie\n")
+cat("Significativité (p-value) :", trend_tmax$trend_significance, "\n")
+```
+
+```{r plot-trend, fig.cap="Anomalies de Tmax par rapport à la période 1981-2010"}
+annual_data <- trend_tmax$annual_values
+
+ggplot(annual_data, aes(x = year, y = anomaly)) +
+  geom_bar(stat = "identity",
+           aes(fill = ifelse(anomaly >= 0, "positif", "négatif")),
+           alpha = 0.8) +
+  geom_smooth(method = "lm", color = "black", linewidth = 0.7, se = FALSE) +
+  scale_fill_manual(values = c("positif" = "#d7191c", "négatif" = "#2c7bb6"),
+                    name = "Anomalie") +
+  labs(title   = "Anomalies de température maximale (référence 1981–2010)",
+       x = "Année", y = "Anomalie (°C)") +
+  theme_minimal()
+```
+
+---
+
+## 6. Indice d'exposition climatique composite
+
+```{r exposure}
+exposure <- calculate_exposure_index(
+  heatwave_df = hw_index,
+  drought_df  = drought_index,
+  frost_df    = frost_risk,
+  w_heat      = 0.4,
+  w_drought   = 0.4,
+  w_frost     = 0.2
+)
+tail(exposure, 5)
+```
+
+```{r exposure-class}
+table(exposure$exposure_class)
+```
+
+```{r plot-exposure, fig.cap="Indice d'exposition climatique (1981–2020)"}
+ggplot(exposure, aes(x = year, y = exposure_index, color = exposure_class)) +
+  geom_line(linewidth = 0.8, alpha = 0.7) +
+  geom_point(size = 2) +
+  scale_color_manual(values = c("faible" = "#27ae60",
+                                "moyen"  = "#f39c12",
+                                "élevé"  = "#e74c3c")) +
+  labs(title = "Indice d'exposition climatique au Maroc",
+       x = "Année", y = "Indice (0–1)", color = "Classe") +
+  theme_minimal()
+```
+
+---
+
+## 7. Comparaison de scénarios
+
+```{r scenarios}
+# Comparer période historique vs période récente
+comparison <- compare_scenarios(
+  climate_morocco,
+  baseline = c(1981, 2000),
+  future   = c(2001, 2020)
+)
+print(comparison)
+```
+climate_morocco$tmax <- climate_morocco$value
+La comparaison montre une anomalie de **+`r comparison$anomaly[comparison$variable == "tmax"]`°C**
+pour la température maximale entre les deux périodes.
+
+---
+
+## 8. Résumé des extrêmes
+
+```{r summary-extremes}
+summary_table <- summarize_extremes(
+  heatwave_df = hw_index,
+  drought_df  = drought_index,
+  frost_df    = frost_risk
+)
+knitr::kable(summary_table,
+             caption = "Synthèse des indices d'extrêmes climatiques",
+             digits  = 2)
+```
+
+---
+
+## 9. Génération de l'atlas climatique
+
+```{r atlas, eval=FALSE}
+# Génère un rapport HTML complet
+generate_risk_atlas(
+  climate_data = climate_morocco,
+  exposure_df  = exposure,
+  output_file  = "atlas_climatique_maroc.html",
+  title        = "Atlas des Risques Climatiques Agricoles — Maroc",
+  region       = "Maroc",
+  open_browser = TRUE
+)
+```
+
+---
+
+## Conclusion
+
+Ce flux de travail complet illustre les capacités du package **climExposure** :
+
+1. **Import** et structuration de données climatiques journalières
+2. **Calcul** des indices de chaleur, sécheresse et gel
+3. **Analyse** des tendances et anomalies climatiques
+4. **Synthèse** via un indice d'exposition composite
+5. **Comparaison** de scénarios temporels
+6. **Reporting** automatique en HTML
+
+Pour aller plus loin, consultez la documentation de chaque fonction avec
+`?calculate_heatwave_index`, `?calculate_exposure_index`, etc.
+
+---
+
+## Références
+
+- **Indices climatiques** : Klein Tank et al. (2009). *Guidelines on Analysis of extremes in a changing climate.* WMO.
+- **Données WorldClim** : Fick & Hijmans (2017). *WorldClim 2.* International Journal of Climatology.
+- **SPI** : McKee et al. (1993). *The relationship of drought frequency and duration to time scales.* 8th Conference on Applied Climatology.
